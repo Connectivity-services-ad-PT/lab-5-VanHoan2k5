@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # Service API FastAPI
   api:
@@ -13,15 +11,16 @@ services:
       db:
         condition: service_healthy
       ai-service:
-        condition: service_healthy
+        condition: service_healthy # Khôi phục lại chuẩn đoán healthy vì AI đã chạy tốt
     networks:
       - team-internal
       - class-net
     ports:
       - "${APP_PORT:-8000}:8000"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
+      # Sửa sang dùng mã Python để tránh lỗi thiếu công cụ curl trong container
+      test: ["CMD-SHELL", "python -c \"import urllib.request; import sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').getcode() == 200 else sys.exit(1)\""]
+      interval: 15s
       timeout: 5s
       retries: 3
       start_period: 10s
@@ -33,7 +32,7 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-lab05}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-lab05pass}
-      POSTGRES_DB: ${POSTGRES_DB:-iotdb}
+      POSTGRES_DB: ${POSTGRES_DB:-lab05}
     volumes:
       - db-data:/var/lib/postgresql/data
     networks:
@@ -51,21 +50,21 @@ services:
     working_dir: /service
     volumes:
       - ./src/ai_service:/service
-    command: ["python", "main.py"]
+    command: ["sh", "-c", "pip install fastapi uvicorn && python main.py"]
     networks:
       - team-internal
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import requests; import sys; sys.exit(0) if requests.get('http://localhost:9000/health').status_code == 200 else sys.exit(1)\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; import sys; sys.exit(0) if urllib.request.urlopen('http://localhost:9000/health').getcode() == 200 else sys.exit(1)\""]
       interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
+      timeout: 10s
+      retries: 10         # Thử lại 10 lần
+      start_period: 300s
 
 networks:
   team-internal:
     driver: bridge
   class-net:
-    external: true
+    driver: bridge
 
 volumes:
   db-data:

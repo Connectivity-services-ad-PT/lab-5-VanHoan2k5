@@ -1,3 +1,4 @@
+import http
 import os
 from datetime import datetime, timezone
 from enum import Enum
@@ -119,7 +120,7 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
         )
 
     problem.setdefault("status", exc.status_code)
-    problem.setdefault("title", status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"))
+    problem.setdefault("title", http.HTTPStatus(exc.status_code).phrase if exc.status_code in list(http.HTTPStatus) else "HTTP Error")
     problem.setdefault("type", "about:blank")
     problem.setdefault("detail", "Request failed")
     problem.setdefault("instance", str(request.url.path))

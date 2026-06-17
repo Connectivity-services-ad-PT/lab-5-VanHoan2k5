@@ -1,0 +1,40 @@
+{
+  "info": {
+    "name": "FIT4110 Lab 05 Auto Verification",
+    "schema": "https://getpostman.com"
+  },
+  "item": [
+    {
+      "name": "01_Functional - GET health returns 200",
+      "request": {
+        "method": "GET",
+        "url": { "raw": "http://localhost:8000/health", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["health"] }
+      }
+    },
+    {
+      "name": "01_Functional - POST readings returns 201",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer local-dev-token", "type": "text" },
+          { "key": "Content-Type", "value": "application/json", "type": "text" }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"device_id\": \"ESP32-LAB-A01\",\n  \"metric\": \"temperature\",\n  \"value\": 31.5,\n  \"unit\": \"celsius\",\n  \"timestamp\": \"2026-05-13T08:30:00+07:00\"\n}"
+        },
+        "url": { "raw": "http://localhost:8000/readings", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["readings"] }
+      }
+    },
+    {
+      "name": "01_Functional - GET latest readings returns 200",
+      "request": {
+        "method": "GET",
+        "header": [
+          { "key": "Authorization", "value": "Bearer local-dev-token", "type": "text" }
+        ],
+        "url": { "raw": "http://localhost:8000/readings/latest?device_id=ESP32-LAB-A01&limit=5", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["readings", "latest"], "query": [{ "key": "device_id", "value": "ESP32-LAB-A01" }, { "key": "limit", "value": "5" }] }
+      }
+    }
+  ]
+}
