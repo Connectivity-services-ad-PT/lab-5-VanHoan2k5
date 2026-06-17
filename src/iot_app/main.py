@@ -1,8 +1,11 @@
 import http
 import os
+import csv
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, List, Optional
+
+from fastapi.middleware.cors import CORSMiddleware
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -23,7 +26,14 @@ app = FastAPI(
         "Luồng logic được kế thừa từ Lab 04 và tiếp tục được dùng để kiểm thử end‑to‑end."
     ),
 )
-
+# --- BỔ SUNG: Cấu hình CORS cho phép gọi API từ mọi thiết bị, mọi trình duyệt ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],             # Cho phép tất cả các nguồn truy cập
+    allow_credentials=True,
+    allow_methods=["*"],             # Cho phép tất cả các phương thức GET, POST, PUT, DELETE
+    allow_headers=["*"],             # Cho phép tất cả các Headers (bao gồm cả Authorization)
+)
 
 class SensorMetric(str, Enum):
     temperature = "temperature"
@@ -83,10 +93,47 @@ class SensorReadingCreated(BaseModel):
     metric: SensorMetric
     accepted: bool
     created_at: str
+    # --- BỔ SUNG: Thêm các trường để trả về thông tin từ CSV ---
+    device_type: Optional[str] = Field(default=None, examples=["environment_sensor"])
+    location: Optional[str] = Field(default=None, examples=["Lab A101"])
+    room: Optional[str] = Field(default=None, examples=["A101"])
+    device_status: Optional[str] = Field(default=None, examples=["active"])
+
 
 
 READINGS: List[Dict] = []
+# --- BỔ SUNG: Logic nạp danh sách thiết bị hợp lệ ---
+DEVICE_REGISTRY: Dict[str, Dict] = {}
 
+# Đường dẫn động tìm file iot_device_registry.csv nằm ở thư mục gốc dự án
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+REGISTRY_FILE_PATH = os.path.join(BASE_DIR, "iot_device_registry.csv")
+
+def load_device_registry():
+    global DEVICE_REGISTRY
+    if not os.path.exists(REGISTRY_FILE_PATH):
+        print(f"⚠️ Cảnh báo: Không tìm thấy file registry tại {REGISTRY_FILE_PATH}")
+        return
+    try:
+        with open(REGISTRY_FILE_PATH, mode='r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                dev_id = row.get("device_id")
+                if dev_id:
+                    # Thêm .strip().lower() vào cuối dev_id để làm sạch chuỗi
+                    DEVICE_REGISTRY[dev_id.strip().lower()] = {
+                        "device_type": row.get("device_type"),
+                        "location": row.get("location"),
+                        "room": row.get("room"),
+                        "status": row.get("status")
+                    }
+        print(f"✅ Đã nạp thành công {len(DEVICE_REGISTRY)} thiết bị vào bộ nhớ.")
+    except Exception as e:
+        print(f"❌ Lỗi khi đọc file registry: {e}")
+
+# Gọi hàm nạp dữ liệu ngay khi khởi chạy ứng dụng
+load_device_registry()
+# --------------------------------------------------
 
 def build_problem(
     *,
@@ -112,17 +159,28 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     if isinstance(exc.detail, dict):
         problem = exc.detail
     else:
+        # Sửa lỗi: Sử dụng thư viện http tiêu chuẩn thay vì status.HTTP_STATUS_CODES lỗi thời
+        try:
+            phrase = http.HTTPStatus(exc.status_code).phrase
+        except ValueError:
+            phrase = "HTTP Error"
+
         problem = build_problem(
             status_code=exc.status_code,
-            title=status.HTTP_STATUS_CODES.get(exc.status_code, "HTTP Error"),
+            title=phrase,
             detail=str(exc.detail),
             instance=str(request.url.path),
         )
 
+    try:
+        default_phrase = http.HTTPStatus(exc.status_code).phrase
+    except ValueError:
+        default_phrase = "HTTP Error"
+
     problem.setdefault("status", exc.status_code)
-    problem.setdefault("title", http.HTTPStatus(exc.status_code).phrase if exc.status_code in list(http.HTTPStatus) else "HTTP Error")
+    problem.setdefault("title", default_phrase)
     problem.setdefault("type", "about:blank")
-    problem.setdefault("detail", "Request failed")
+    problem.setdefault("detail", str(exc.detail) if exc.detail else "Request failed")
     problem.setdefault("instance", str(request.url.path))
 
     return JSONResponse(
@@ -155,29 +213,38 @@ async def validation_exception_handler(
     )
 
 
-def verify_bearer_token(authorization: Optional[str] = Header(default=None)) -> None:
-    if not authorization:
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+
+# Khởi tạo Security Scheme theo chuẩn HTTP Bearer
+security = HTTPBearer()
+
+def verify_bearer_token(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> None:
+    if not credentials:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=build_problem(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 title="Unauthorized",
                 detail="Missing Authorization header",
-                problem_type="https://smart-campus.local/problems/unauthorized",
+                instance="/readings",
+                problem_type="https://smart-campus.local",
             ),
         )
 
-    expected = f"Bearer {AUTH_TOKEN}"
-    if authorization != expected:
+    # Lấy chuỗi token nguyên bản đã được bóc tách tự động (bỏ qua chữ "Bearer ")
+    token = credentials.credentials
+    if token != AUTH_TOKEN:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=build_problem(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 title="Unauthorized",
                 detail="Invalid bearer token",
-                problem_type="https://smart-campus.local/problems/unauthorized",
+                instance="/readings",
+                problem_type="https://smart-campus.local",
             ),
         )
+
 
 
 def now_iso() -> str:
@@ -210,13 +277,75 @@ def health() -> HealthResponse:
     },
 )
 def create_reading(payload: SensorReadingCreate, response: Response) -> SensorReadingCreated:
-    # Ví dụ logic cảnh báo: nếu nhiệt độ >= 70 thì thêm header cảnh báo
-    if payload.metric == SensorMetric.temperature and payload.value >= 70:
-        response.headers["X-Warning"] = "high-temperature"
+    # 1. Khởi tạo các thuộc tính trạng thái mặc định
+    env_status = "normal"
+    alert_level = "none"
+    reason = "environment_normal"
 
+    # 2. Bước Validate: Kiểm tra thiết bị trong Device Registry (File CSV)
+    # LƯU Ý: Chuyển payload.device_id sang chữ thường (lowercase) để khớp chính xác với file CSV của bạn
+    device_key = payload.device_id.strip().lower()
+    if device_key not in DEVICE_REGISTRY:
+        env_status = "invalid_device"
+        alert_level = "high"
+        reason = "device_not_registered"
+        
+        # Trả về lỗi 400 Bad Request ngay lập tức nếu thiết bị lạ
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=build_problem(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                title="Invalid Device",
+                detail=f"Device '{payload.device_id}' không tồn tại trong hệ thống đăng ký.",
+                instance="/readings",
+                problem_type="https://smart-campus.local"
+            )
+        )
+
+    # 3. Bước Validate & Phân loại: Kiểm tra giá trị lỗi cảm biến (Sensor Error)
+    if payload.value is None:
+        env_status = "sensor_error"
+        alert_level = "high"
+        reason = "sensor_values_null"
+
+    # 4. Bước Phân loại: Áp dụng Rules Engine đánh giá trạng thái môi trường
+    else:
+        val = payload.value
+        metric = payload.metric
+
+        # --- Kiểm tra mức NGUY HIỂM (Danger) ---
+        if (metric == SensorMetric.temperature and val >= 40) or \
+           (metric == "co2" and val >= 1800) or \
+           (metric == SensorMetric.smoke and val >= 1.0):
+            env_status = "danger"
+            alert_level = "critical"
+            if metric == SensorMetric.temperature: reason = "extreme_high_temperature"
+            elif metric == "co2": reason = "extreme_high_co2"
+            else: reason = "smoke_detected_danger"
+
+        # --- Kiểm tra mức CẢNH BÁO (Warning) ---
+        elif (metric == SensorMetric.temperature and val >= 35) or \
+             (metric == SensorMetric.humidity and val >= 85) or \
+             (metric == "co2" and val >= 1200) or \
+             (metric == SensorMetric.smoke and val >= 0.5) or \
+             (metric == "battery" and val < 20):
+            env_status = "warning"
+            alert_level = "medium"
+            if metric == SensorMetric.temperature: reason = "high_temperature_warning"
+            elif metric == SensorMetric.humidity: reason = "high_humidity_warning"
+            elif metric == "co2": reason = "high_co2_warning"
+            elif metric == SensorMetric.smoke: reason = "smoke_detected_warning"
+            else: reason = "low_battery_warning"
+
+    # 5. Thêm Header thông báo nếu rơi vào trạng thái nguy hiểm hoặc cảnh báo
+    if env_status in ["warning", "danger"]:
+        response.headers["X-Warning"] = f"{env_status}-{payload.metric.value}"
+
+    # 6. Tạo gói dữ liệu sạch (Processed Event)
     reading_id = next_reading_id()
     created_at = now_iso()
 
+    device_info = DEVICE_REGISTRY.get(device_key, {})
     item = {
         "reading_id": reading_id,
         "device_id": payload.device_id,
@@ -225,6 +354,14 @@ def create_reading(payload: SensorReadingCreate, response: Response) -> SensorRe
         "unit": payload.unit.value if payload.unit else None,
         "timestamp": payload.timestamp,
         "created_at": created_at,
+        "status": env_status,
+        "alert_level": alert_level,
+        "reason": reason,
+        # Lưu kèm thông tin thiết bị vào mảng READINGS nội bộ
+        "device_type": device_info.get("device_type"),
+        "location": device_info.get("location"),
+        "room": device_info.get("room"),
+        "device_status": device_info.get("status")
     }
     READINGS.append(item)
 
@@ -234,8 +371,11 @@ def create_reading(payload: SensorReadingCreate, response: Response) -> SensorRe
         metric=payload.metric,
         accepted=True,
         created_at=created_at,
+        device_type=device_info.get("device_type"),
+        location=device_info.get("location"),
+        room=device_info.get("room"),
+        device_status=device_info.get("status") # Tên cột status trong file CSV của bạn
     )
-
 
 @app.get("/readings/latest", dependencies=[Depends(verify_bearer_token)])
 def latest_readings(
@@ -266,3 +406,11 @@ def get_reading(reading_id: str) -> Dict:
             problem_type="https://smart-campus.local/problems/not-found",
         ),
     )
+if __name__ == "__main__":
+    import uvicorn
+    # Đọc cấu hình APP_HOST và APP_PORT từ file .env qua môi trường hệ thống
+    host = os.getenv("APP_HOST", "0.0.0.0")
+    port = int(os.getenv("APP_PORT", "8000"))
+    
+    # Ép buộc uvicorn khởi chạy đúng theo cấu hình biến môi trường
+    uvicorn.run("main:app", host=host, port=port, reload=True)
