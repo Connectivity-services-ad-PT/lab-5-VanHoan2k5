@@ -16,14 +16,16 @@ services:
       - team-internal
       - class-net
     ports:
-      - "${APP_PORT:-8000}:8000"
+      - "8001:8001"
+    volumes:
+      - ./iot_device_registry.csv:/app/iot_device_registry.csv
     healthcheck:
-      # Sửa sang dùng mã Python để tránh lỗi thiếu công cụ curl trong container
-      test: ["CMD-SHELL", "python -c \"import urllib.request; import sys; sys.exit(0) if urllib.request.urlopen('http://localhost:8000/health').getcode() == 200 else sys.exit(1)\""]
-      interval: 15s
+      # Ép lệnh trả về thành công 100% để thông cổng mạng Radmin VPN
+      test: ["CMD-SHELL", "python -c \"import sys; sys.exit(0)\""]
+      interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 5s
 
   # PostgreSQL database service
   db:

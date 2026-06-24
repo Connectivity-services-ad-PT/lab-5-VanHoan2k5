@@ -1,0 +1,69 @@
+asyncapi: 2.6.0
+info:
+  title: Group B1 - IoT Ingestion MQTT Contract (Official Rubric)
+  version: 1.0.0
+  description: Tài li?u d?nh nghia Topic và c?u trúc b?n tin MQTT chính th?c c?a nhóm B1 theo barem ch?m di?m c?a Gi?ng viên.
+
+channels:
+  smart-campus/raw/iot/environment:
+    publish:
+      summary: Lu?ng nh?n d? li?u thô (chu k? 5s/gói) g?i t? Simulator c?a Gi?ng viên.
+  smart-campus/events/sensor:
+    subscribe:
+      summary: Lu?ng phát d? li?u IoT s?ch dã qua x? lý và phân lo?i. Nhóm B6 và Analytics s? l?ng nghe t?i dây.
+      message:
+        payload:
+          type: object
+          required:
+            - event_type
+            - source_service
+            - raw_event_id
+            - device_id
+            - status
+            - alert_level
+            - reason
+          properties:
+            event_type:
+              type: string
+              example: sensor.reading.processed
+            source_service:
+              type: string
+              example: team-iot
+            raw_event_id:
+              type: string
+              example: raw-iot-abc123
+            device_id:
+              type: string
+              example: esp32-lab-a101
+            location:
+              type: string
+              example: Lab A101
+            temperature_c:
+              type: number
+              example: 31.2
+            humidity_percent:
+              type: number
+              example: 68.5
+            motion_detected:
+              type: boolean
+              example: false
+            co2_ppm:
+              type: integer
+              example: 650
+            smoke_ppm:
+              type: number
+              example: 0.02
+            battery_percent:
+              type: integer
+              example: 87
+            status:
+              type: string
+              enum: [normal, warning, danger, sensor_error, invalid_device]
+              example: normal
+            alert_level:
+              type: string
+              enum: [low, medium, high]
+              example: low
+            reason:
+              type: string
+              example: all_metrics_normal

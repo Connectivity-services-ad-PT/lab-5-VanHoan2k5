@@ -8,7 +8,7 @@
       "name": "01_Functional - GET health returns 200",
       "request": {
         "method": "GET",
-        "url": { "raw": "http://localhost:8000/health", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["health"] }
+        "url": { "raw": "http://127.0.0", "protocol": "http", "host": ["127", "0", "0", "1"], "port": "8001", "path": ["health"] }
       }
     },
     {
@@ -21,9 +21,9 @@
         ],
         "body": {
           "mode": "raw",
-          "raw": "{\n  \"device_id\": \"esp32-b101\",\n  \"temperature\": 31.5,\n  \"humidity\": 72.0,\n  \"motion\": true,\n  \"timestamp\": \"2026-05-02T09:00:00Z\"\n}"
+          "raw": "{\n  \"device_id\": \"esp32-lab-a101\",\n  \"metric\": \"temperature\",\n  \"value\": 31.5,\n  \"unit\": \"celsius\",\n  \"timestamp\": \"2026-05-13T08:30:00+07:00\"\n}"
         },
-        "url": { "raw": "http://localhost:8000/readings", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["readings"] }
+        "url": { "raw": "http://127.0.0", "protocol": "http", "host": ["127", "0", "0", "1"], "port": "8001", "path": ["readings"] }
       }
     },
     {
@@ -33,7 +33,7 @@
         "header": [
           { "key": "Authorization", "value": "Bearer local-dev-token", "type": "text" }
         ],
-        "url": { "raw": "http://localhost:8000/readings/latest?device_id=esp32-b101&limit=5", "protocol": "http", "host": ["localhost"], "port": "8000", "path": ["readings", "latest"], "query": [{ "key": "device_id", "value": "esp32-b101" }, { "key": "limit", "value": "5" }] }
+        "url": { "raw": "http://127.0.0/latest?device_id=esp32-lab-a101&limit=5", "protocol": "http", "host": ["127", "0", "0", "1"], "port": "8001", "path": ["readings", "latest"], "query": [{ "key": "device_id", "value": "esp32-lab-a101" }, { "key": "limit", "value": "5" }] }
       }
     }
   ]
