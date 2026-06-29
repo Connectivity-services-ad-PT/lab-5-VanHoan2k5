@@ -116,32 +116,36 @@ READINGS: List[Dict] = []
 
 # --- 4. HÀM NGHIỆP VỤ PHÂN LOẠI CHUNG ---
 def classify_sensor_reading(device_id: str, temperature_c: Optional[float], humidity_percent: Optional[float], co2_ppm: Optional[int], smoke_ppm: Optional[float], battery_percent: Optional[int]) -> dict:
-    status_result = "normal"
-    alert_level = "low"
-    reasons = []
-
+    """
+    Hàm phân loại tự động 4 mức độ cảnh báo (CRITICAL, HIGH, MEDIUM, LOW) 
+    theo đúng bảng quy hoạch mới nhất của lớp học.
+    """
+    # 1. MỨC ĐỘ LOW (Thấp) - Thiết bị lạ hoặc lỗi do đọc số liệu không chuẩn
     if device_id.strip().lower() not in DEVICE_REGISTRY:
-        return {"status": "invalid_device", "alert_level": "high", "reason": "device_not_in_registry"}
-
+        return {"status": "invalid_device", "alert_level": "low", "reason": "invalid_device: device_not_in_registry"}
+        
     if temperature_c is None or humidity_percent is None:
-        return {"status": "sensor_error", "alert_level": "medium", "reason": "temperature_or_humidity_is_null"}
+        return {"status": "sensor_error", "alert_level": "low", "reason": "sensor_error: measurement_data_is_null"}
 
-    if temperature_c >= 40 or (co2_ppm is not None and co2_ppm >= 1800) or (smoke_ppm is not None and smoke_ppm >= 1.0):
-        status_result = "danger"
-        alert_level = "high"
-        if temperature_c >= 40: reasons.append("temperature_too_high")
-        if co2_ppm is not None and co2_ppm >= 1800: reasons.append("co2_danger")
-        if smoke_ppm is not None and smoke_ppm >= 1.0: reasons.append("smoke_danger")
-    elif temperature_c >= 35 or humidity_percent >= 85 or (co2_ppm is not None and co2_ppm >= 1200) or (smoke_ppm is not None and smoke_ppm >= 0.5) or (battery_percent is not None and battery_percent < 20):
-        status_result = "warning"
-        alert_level = "medium"
-        if temperature_c >= 35: reasons.append("temperature_warning")
-        if humidity_percent >= 85: reasons.append("humidity_high")
-        if battery_percent is not None and battery_percent < 20: reasons.append("low_battery")
-    else:
-        reasons.append("all_metrics_normal")
+    # 2. MỨC ĐỘ CRITICAL (Khẩn cấp) - Hỏa hoạn/Khói cháy hoặc Nhiệt độ quá hiểm họa
+    if (smoke_ppm is not None and smoke_ppm >= 1.0) or temperature_c >= 50.0:
+        return {"status": "danger", "alert_level": "critical", "reason": "critical: fire_or_extreme_heat_detected"}
 
-    return {"status": status_result, "alert_level": alert_level, "reason": ", ".join(reasons)}
+    # 3. MỨC ĐỘ HIGH (Cao) - Vấn đề môi trường phòng máy vượt ngưỡng nguy hiểm
+    if temperature_c >= 40.0 or (co2_ppm is not None and co2_ppm >= 1800):
+        return {"status": "danger", "alert_level": "high", "reason": "high: server_room_temperature_exceeded_threshold"}
+
+    # 4. MỨC ĐỘ MEDIUM (Trung bình) - Cảm biến yếu pin hoặc cảnh báo vận hành thường quy
+    if (battery_percent is not None and battery_percent < 20) or temperature_c >= 35.0 or humidity_percent >= 85.0:
+        reasons = []
+        if battery_percent is not None and battery_percent < 20: reasons.append("low_battery_warning")
+        if temperature_c >= 35.0: reasons.append("temperature_warning")
+        if humidity_percent >= 85.0: reasons.append("humidity_high")
+        return {"status": "warning", "alert_level": "medium", "reason": ", ".join(reasons)}
+
+    # 5. MỨC ĐỘ LOW (Thấp) - Trạng thái bình thường không có lỗi
+    return {"status": "normal", "alert_level": "low", "reason": "all_metrics_normal"}
+
 
 # --- 5. LUỒNG XỬ LÝ TRUYỀN TIN NGẦM MQTT ---
 mqtt_client = mqtt.Client()
@@ -226,8 +230,32 @@ def create_reading(payload: SensorReadingCreate):
         "room": dev_info.get("room", "unknown"),
         "device_status": dev_info.get("status", "unknown")
     }
+    # --- BỔ SUNG: Đóng gói schema sự kiện và phát sang máy bạn Minh ---
+    try:
+        processed_event = {
+            "event_type": "sensor.reading.processed",
+            "source_service": "team-iot",
+            "raw_event_id": f"raw-swagger-{reading_id}",
+            "device_id": payload.device_id,
+            "location": dev_info.get("location", "unknown"),
+            "temperature_c": payload.value if payload.metric == SensorMetric.temperature else 25.0,
+            "humidity_percent": payload.value if payload.metric == SensorMetric.humidity else 50.0,
+            "motion_detected": False,
+            "co2_ppm": 400,
+            "smoke_ppm": 0.0,
+            "battery_percent": 100,
+            "status": "normal",            # Gán thẳng để test kết nối nhanh
+            "alert_level": "low",          # Gán thẳng để test kết nối nhanh
+            "reason": "swagger_test_trigger"
+        }
+        # Thực hiện bắn dữ liệu trực tiếp sang IP của Minh B6
+        mqtt_client.publish(TOPIC_PROCESSED_OUTPUT, json.dumps(processed_event))
+        print(f"📤 [Swagger Trigger] Đã đẩy dữ liệu sạch lên topic: {TOPIC_PROCESSED_OUTPUT}")
+    except Exception as e:
+        print(f"❌ Lỗi bắn MQTT từ Swagger: {e}")
+
     READINGS.append(response_data)
-    return response_data
+    return response_data    
 
 @app.get("/readings/latest", dependencies=[Depends(verify_bearer_token)])
 def get_latest_readings(device_id: str = Query(...), limit: int = Query(5)):
